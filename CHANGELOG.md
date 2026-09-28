@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-28
+
 Two guards added, both from failures that actually happened and are documented
 in the research archive. Both ship with a fixture that reproduces the broken
 case, a fixture that reproduces the corrected one, and tests in both directions.
@@ -264,3 +266,4 @@ that, in a library built to catch overstatement.
   the easy path and bypassing is explicit.
 
 [0.1.0]: https://github.com/beduldul/honest-backtest/releases/tag/v0.1.0
+[0.2.0]: https://github.com/beduldul/honest-backtest/releases/tag/v0.2.0
