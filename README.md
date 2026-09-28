@@ -33,6 +33,8 @@ The refusal path is the easy path. That is the whole design.
   - [5. Multiple-testing accounting](#5-multiple-testing-accounting)
   - [6. Structural data traps](#6-structural-data-traps)
   - [7. Block bootstrap confidence intervals](#7-block-bootstrap-confidence-intervals)
+  - [8. Evidence presence](#8-evidence-presence)
+  - [9. Shared selection predicates](#9-shared-selection-predicates)
 - [A full worked example: a result being refused](#a-full-worked-example-a-result-being-refused)
 - [Command line](#command-line)
 - [What this does NOT do](#what-this-does-not-do)
@@ -55,12 +57,51 @@ p < 0.001. Nine wins out of twelve. A confidence interval of
 each one was worthless.
 
 **And the fixtures are not exempt from that standard.** Every fixture in this
-library carries a provenance label, and the library checks it: `MEASURED` when
-the per-observation rows are the research archive's own, `DERIVED` when the
-statistic is measured and the series is solved from it, `ILLUSTRATIVE` when the
-numbers demonstrate a mechanism rather than report a finding.
-`fixtures.provenance()` audits the lot. A library about not overstating your
-evidence does not get to overstate its own.
+library carries a provenance label, and the library checks it:
+
+| label | means |
+|---|---|
+| `MEASURED` | the per-observation rows are the research archive's own, transcribed |
+| `MEASURED_DESIGN` | the *design* is the archive's; the per-observation values are not |
+| `DERIVED` | the statistic is measured, and the series is solved from it |
+| `ILLUSTRATIVE` | the numbers demonstrate a mechanism; they are not a finding |
+
+`fixtures.provenance()` audits the lot, recomputing each `MEASURED` fixture's
+claimed statistic from its own rows and failing any that no longer reproduces
+it. A library about not overstating your evidence does not get to overstate its
+own.
+
+The nineteen fixtures, by label:
+
+| fixture | label | quantity |
+|---|---|---|
+| `copier_pnl` | `MEASURED` | spread +0.1344, r = −0.598 |
+| `roi` | `MEASURED` | spread +1.0190, r = +0.43 |
+| `zero_padded_inception` | `MEASURED` | 11-day-old portfolio with 365 points |
+| `left_edge_bar` | `MEASURED` | 15m bar at t0 read as starting t0+1m |
+| `pypi_scan_503` | `MEASURED` | five 503s recorded as `exists: false` |
+| `pypi_three_state_corrected` | `MEASURED` | 15 present / 8 absent / 2 unknown |
+| `nested_four_split` | `MEASURED_DESIGN` | 4 splits, one shared end date, 0 independent |
+| `disjoint_twelve` | `MEASURED_DESIGN` | 12 disjoint 30-day windows from a 365-day panel |
+| `nested_four_split_asymmetry` | `MEASURED_DESIGN` | retracted "POSITIVE 4/4 splits" |
+| `top_decile_121` | `DERIVED` | top 10% of trades = 121% of net PnL |
+| `multiplicity_341` | `DERIVED` | 341 configurations, 17.05 expected false positives |
+| `nine_of_twelve` | `ILLUSTRATIVE` | mean −138.7, median +37.0, 9/12 wins |
+| `top_decile_164` | `ILLUSTRATIVE` | top-10% share = 1.64 |
+| `spliced_metrics` | `ILLUSTRATIVE` | 365D cumulative spliced to 30D rolling |
+| `trade_level_false_positive` | `ILLUSTRATIVE` | CI [−0.021, +0.781] on 378 trades, 4 symbols |
+| `multiplicity_60` | `ILLUSTRATIVE` | 60 configurations, 1 positive, ~3 expected |
+| `code_search_null_without_control` | `ILLUSTRATIVE` | control queries not persisted; 4 → 10–18 |
+| `dormant_zero_forward_returns` | `ILLUSTRATIVE` | the zero-mass heuristic's inputs |
+| `clean_control` | `ILLUSTRATIVE` | a genuinely clean control |
+
+Note the two the 2026-09-28 episode added on opposite sides of the line. The
+**broken** scan and the **corrected** scan are both `MEASURED`: they are real
+artifacts of the same probe run twice, and the broken one is worth keeping
+*because* it is wrong. The code-search control queries, by contrast, are
+`ILLUSTRATIVE` — the narrative records them but no captured output survives on
+disk, so they are labelled rather than borrowing the credibility of the two
+neighbouring measured fixtures.
 
 So this library does not compute results. It **refuses** them. A guard that
 finds a disqualifying condition returns `REFUSED`, and a refused result is not
@@ -458,6 +499,166 @@ membership while randomising the arrangement.
 
 ---
 
+### 8. Evidence presence
+
+**Two failures it caught, both from the same day.**
+
+**(a) An error read as an absence.** A package-availability scan wrote every
+non-200 response down in one shape:
+
+```json
+{"exists": false, "code": 503}
+```
+
+HTTP **503 (Service Unavailable / rate-limited)** is not **404 (Not Found)**.
+Five names in that scan — `pbo`, `cscv`, `overfit`, `probabilistic-sharpe`,
+`backtest-overfit` — came back 503 and were recorded as absent, and the claim
+that followed ("the non-200 names are absent") was therefore *reproduced by
+accident* rather than verified. Re-run the same day with a three-state
+classifier, **`overfit` was PRESENT on PyPI**, and the corrected run reported no
+503s at all — because it classified a non-404 as `UNKNOWN` and backed off
+instead of concluding. One package that was reported missing had been there the
+whole time.
+
+**(b) A zero read as "nobody does this".** A code-search tool returned **zero
+results** for a query, and the zero became "there is no prior art". Control
+queries proved the tool was broken: `lang:python "def sharpe_ratio"` returned 0
+— and so did `numba`, which returned 1. A term present in thousands of
+repositories returned one match. The decider number moved from a false **4** to
+**10–18** once the zeros were discarded.
+
+```python
+from honest_backtest.guards.evidence import EvidenceGuard, Observation
+
+guard = EvidenceGuard(negative_claim="non-200 means the package is absent")
+report = guard.run(
+    [Observation("pbo", "503"), Observation("cscv", "503"), Observation("overfit", "503")],
+    claimed_absent=["pbo", "cscv", "overfit"],
+)
+report.verdict        # Verdict.REFUSED
+report.n_absent       # 0    <- not one of those three resolved the question
+report.n_unknown      # 3    <- 503 is 'I could not reach it'
+```
+
+Three classes, and the boundary between them is the entire subject of the guard:
+
+| class | means | requires |
+|---|---|---|
+| `PRESENT` | the object was returned | any successful status |
+| `ABSENT` | the question was *resolved* and the answer is no | an explicit not-found signal (`404`, `410`, `ENOENT`) |
+| `UNKNOWN` | the instrument did not resolve the question | **everything else, including every code nobody named** |
+
+The classification is a table (`DEFAULT_CODE_CLASSES`), not an if-chain, so the
+boundary is readable in one place. **429 / 503 / timeout / connection-reset are
+`UNKNOWN`, never `ABSENT`**, and an unnamed code defaults to `UNKNOWN` — the
+default direction of the mistake is deliberately the harmless one, because
+calling a present object unknown costs you a lead while calling an unreachable
+object absent costs you a false conclusion.
+
+**Nothing here is HTTP-specific.** The HTTP codes are examples from the recorded
+failure, not an assumption about the source. `code_classes=` reclassifies for
+GraphQL (HTTP 200 with `data: null`), a JSON body field (`{"found": false}`), a
+filesystem (`ENOENT` vs `EACCES`), or anything else; `unknown_codes=` forces
+codes to `UNKNOWN` for a source that lies about them.
+
+A second instrument runs alongside: **a null result with no positive control**.
+If the instrument returned nothing anywhere in the set, and no known-positive
+input demonstrates it can return something, the null is not evidence. That is
+failure (b) exactly, and it is **blocking by default** — not only when a
+`negative_claim` is asserted. An earlier draft failed only on an asserted claim
+and merely warned otherwise, which meant the *default* configuration certified a
+scan in which nothing had been resolved. That is the recorded failure produced
+by the defaults, and it was fixed.
+
+The control cuts both ways, and both directions are findings. A control that
+returns the configured success code (`known_positive_code`, default `200`)
+demonstrates the instrument works. A control on a **known-positive input
+returning anything else** demonstrates the instrument is *broken* — stronger
+evidence than having no control at all. That is the `numba` → 1 case, and it is
+reported as a failed control rather than quietly discarded.
+
+The report always prints the **conclusive fraction** (share of observations the
+instrument actually resolved). A set that is 90% `UNKNOWN` says almost nothing
+however clean the rest of it looks, and this is the reader's only warning.
+
+An **absence is a claim that requires support**, and the guard checks that
+direction too: a subject declared absent with no observation behind it, or with
+a `PRESENT` observation contradicting it, is refused. Checking only the
+`UNKNOWN` direction would have left the module's own premise unenforced.
+
+---
+
+### 9. Shared selection predicates
+
+**The failure it caught.** A walk-forward evaluation compared a cohort against a
+benchmark. The cohort excluded stale and dormant subjects. The benchmark did not.
+Dormant subjects have a flat **0%** forward return — fake data, not a flat
+performance — which drags the benchmark toward zero and makes any active cohort
+look skilful. It produced a reported **"POSITIVE 4/4 splits"**, retracted once
+the two sides were routed through one shared predicate. On the real retraction
+table the benchmark mean is positive in **all four** splits while the cohort mean
+runs between −330 and −1136.
+
+The violating code carried a comment stating the very principle it broke: *"its
+flat stretch would be counted as a genuine 0% return."*
+
+```python
+from honest_backtest.guards.comparison import ComparisonGuard, Population, Predicate
+
+report = ComparisonGuard().run(
+    Population("cohort",    Predicate("eligible_as_of",
+        ("history_days >= 30", "not stale", "not frozen as of split_ts")), 3151),
+    Population("benchmark", Predicate("benchmark_filter", ("history_days >= 30",)), 3151),
+)
+report.same_clauses            # False
+report.asymmetric_filtering    # False -- a *different* rule, not a missing one
+report.verdict                 # Verdict.REFUSED
+```
+
+**This guard is honest about what it cannot do**, and that is why it is shaped
+this way. It cannot recover a selection rule from the selected values: two
+populations of the same size with the same mean can have been produced by any
+two filters, and a purely numerical check would be a guess dressed as an
+inference. So it **requires the caller to declare its predicates** and refuses
+when the declarations differ. A declaration is diffable, reviewable, and
+pinnable in a test. **A guard that cannot be fooled is worth more than one that
+guesses.**
+
+It detects four kinds of divergence:
+
+- **different clauses** — the recorded failure;
+- **one side filtered, the other not** — a distinct case, since an empty
+  predicate is not a *different* rule, it is the *absence* of one;
+- **identical clauses under different names** — identical today is not the same
+  as one shared rule, and the next edit to one will not touch the other;
+- **different clause order**, *where the caller declares order observable*. For
+  a streaming filter chain it is; for a set intersection it is not, and claiming
+  a divergence from unobservable order would be inventing evidence.
+
+`report.py` goes one step further: pass `comparison_predicate=` and each side's
+declaration is compared against that third, independent statement of the rule
+the run claims to have used. "We both did X" cannot then be asserted about a run
+whose stated rule was Y.
+
+**The secondary instrument, and its status.** One symptom *is* visible
+numerically: when one population carries a large mass of exactly-zero forward
+returns and the other does not, that is consistent with dormant subjects being
+left in. It is a **heuristic, not proof** — it cannot distinguish "the benchmark
+is half asleep" from "this cohort genuinely had a quiet period", because it has
+the numbers and the rule that made them is not in the numbers. It therefore
+**can never refuse** a comparison: only a declaration can do that.
+
+It is not invisible either, and the distinction is worth stating precisely. The
+finding is `WARN` at `INFO` severity, so `PredicateAuditReport.verdict` — which
+reads `Severity` — is untouched by it. But the aggregate `HonestyReport` maps any
+`WARN` to `SUSPECT`, reading `Status` rather than `Severity`. A zero-mass symptom
+alone leaves the guard's own report `CERTIFIED` while downgrading the composite
+to `SUSPECT`. An earlier draft's docstring claimed the heuristic "cannot move the
+verdict" at all, which was false about the composite; it can downgrade, it just
+cannot refuse.
+
+---
+
 ## A full worked example: a result being refused
 
 Everything in this example **passes a significance test**. What kills it is the
@@ -571,6 +772,8 @@ honest-backtest check result.json            # 0 CERTIFIED, 1 SUSPECT, 2 REFUSED
 honest-backtest check result.json --json     # full machine-readable report
 honest-backtest check --example              # the built-in contaminated fixture
 honest-backtest lookahead                    # one guard, one command
+honest-backtest evidence                     # the 503-recorded-as-404 scan
+honest-backtest comparison                   # the cohort/benchmark asymmetry
 honest-backtest series --json
 ```
 
@@ -591,14 +794,16 @@ copier_pnl + nine_of_twelve + nested walk-forward (measured fixtures): REFUSED
   [FAIL] CONCENTRATION_TAIL_DOMINANCE: top 10% of observations produce 121% of net PnL (threshold 1.00); excluding the tail the result is -793.1
   [FAIL] WINDOWS_FULLY_NESTED: all 4 splits share the same end date (2024-07-01); the forward windows are strictly nested and the count of pairwise-independent windows is 0, below the required 2. An effective sample of 0 cannot be read as 4 confirmations
   [FAIL] SERIES_SPLICE_DETECTED: level discontinuity at index 119 -> 120: step of -24,046.0 is 57,125x the local scale (0.421); a single step this large against the surrounding variation is the signature of two different metrics spliced end-to-end, and differencing across it produces a fabricated value
-  guards not run (no inputs supplied): universe, multiplicity
+  guards not run (no inputs supplied): universe, multiplicity, evidence, comparison
   guards run: lookahead, concentration, windows, series
 
 5 blocking finding(s); guards run: lookahead, concentration, windows, series
 ```
 
-Note the six failures: all six of the measured numbers above, reproduced in one
-command. `--json` emits the same report with the raw statistics attached:
+Note the five failures: all five of the measured numbers above, reproduced in
+one command. (`refused_report.py` extends the same payload with the evidence and
+comparison guards, and prints six.) `--json` emits the same report with the raw
+statistics attached:
 
 ---
 
@@ -627,6 +832,13 @@ Read this section before you trust anything above.
   - **It cannot see a bad comparison you did not describe.** The universe guard
     checks that *the two selections you gave it* share a predicate. If the right
     benchmark is missing from your result set entirely, that is invisible here.
+    The comparison guard extends this to populations you cannot fingerprint, but
+    it only checks the declarations it is handed: it cannot tell whether a
+    declared predicate is the one that actually ran.
+  - **It cannot tell you why an instrument failed.** The evidence guard knows
+    that a 503 is not a 404. It does not know whether a `404` from your specific
+    API means "not there" or "the routing layer is misconfigured", and it will
+    read a labeled `404` as absence.
 - **It cannot rescue a result.** There is no "apply correction and continue"
   path. A refused result stays refused.
 
@@ -686,6 +898,21 @@ Beyond the section above:
    number.
 7. **`certify()` on an individual report is not a composite verdict.** A single
    guard can only speak for itself. Only `HonestyReport` sees all of them.
+8. **The evidence guard is only as good as the codes it is given.** It
+   classifies strings against a table, so a source that reports an outage as
+   `404` will still be read as `ABSENT` — the guard cannot see the HTTP
+   transport, only the code the caller hands it. `unknown_codes=` exists for
+   exactly this and must be used when you know a source lies. The guard's
+   protection is that an *unnamed* code defaults to `UNKNOWN`; it is not
+   protection against a source that names its failure `404` on purpose.
+9. **The comparison guard reads declarations, not data.** It cannot recover a
+   selection rule from the values that rule produced, and it does not try. Two
+   sides that declare matching predicates pass even if the populations they
+   carry were in fact assembled some other way — the declaration is the evidence,
+   and a false declaration is outside what any of this can catch. What it *can*
+   do is make the declaration explicit, diffable, and costly to change silently.
+   The numeric zero-mass symptom is explicitly a heuristic and cannot refuse
+   anything.
 
 ---
 

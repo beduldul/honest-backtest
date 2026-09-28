@@ -29,6 +29,13 @@ from datetime import date, datetime
 from typing import Callable, Iterable, Mapping, Sequence
 
 from .audit import assert_no_bypass
+from .guards.comparison import (
+    DIVERGENT_PREDICATE_FAILURE,
+    ComparisonGuard,
+    Population,
+    Predicate,
+)
+from .guards.evidence import EvidenceGuard, Observation
 from .guards.lookahead import LookaheadGuard, LookaheadReport
 from .guards.multiplicity import ExperimentCounter, MultiplicityReport
 from .guards.outliers import ConcentrationGuard, ConcentrationReport
@@ -86,6 +93,23 @@ class ResultSet:
     series_timestamps: tuple[datetime, ...] = ()
     series_step_seconds: float | None = None
 
+    # evidence presence (negative-evidence provenance)
+    observations: tuple[Observation, ...] = ()
+    control_observations: tuple[Observation, ...] = ()
+    negative_claim: str | None = None
+    claimed_absent: tuple[str, ...] = ()
+
+    # comparison predicates (declared selection rules)
+    cohort_population: Population | None = None
+    benchmark_population: Population | None = None
+    comparison_predicate: Predicate | None = None
+    """The one shared predicate both sides *should* have been built with.
+
+    When supplied, it is compared against each side's declared predicate, so a
+    run that passes the shared rule and then declares a divergent one is caught
+    rather than taken at its word.
+    """
+
     def __post_init__(self) -> None:
         if not self.name:
             raise HonestyError("ResultSet.name must be non-empty")
@@ -106,6 +130,12 @@ class ResultSet:
             "has_benchmark": self.benchmark is not None,
             "n_series_values": len(self.series_values),
             "n_series_timestamps": len(self.series_timestamps),
+            "n_observations": len(self.observations),
+            "n_control_observations": len(self.control_observations),
+            "negative_claim": self.negative_claim,
+            "has_cohort_population": self.cohort_population is not None,
+            "has_benchmark_population": self.benchmark_population is not None,
+            "has_comparison_predicate": self.comparison_predicate is not None,
         }
 
 
@@ -136,6 +166,21 @@ class Config:
     bootstrap_min_blocks: int = 10
     bootstrap_block_size: int = 7
 
+    evidence_min_conclusive_fraction: float = 0.5
+    """Below this share of conclusive observations, the evidence guard warns.
+
+    Not a failure: "I could not reach the API" is a valid thing to report. It is
+    just not evidence, and the report says so rather than letting a set of
+    ``UNKNOWN`` codes pass as a clean scan.
+    """
+
+    comparison_zero_mass_gap: float = 0.20
+    """Exact-zero forward-return share gap at which the *heuristic* symptom warns.
+
+    Never blocking. The numeric symptom cannot distinguish a benchmark full of
+    dormant subjects from a cohort that genuinely had a quiet period.
+    """
+
     assert_no_unguarded_construction: bool = False
     """Set ``True`` to have the report parse caller source for forged verdicts.
 
@@ -163,6 +208,10 @@ class Config:
             raise HonestyError("lookahead_min_splits must be >= 2")
         if self.min_independent_windows < 1:
             raise HonestyError("min_independent_windows must be >= 1")
+        if not 0.0 <= self.evidence_min_conclusive_fraction <= 1.0:
+            raise HonestyError("evidence_min_conclusive_fraction must be in [0, 1]")
+        if not 0.0 <= self.comparison_zero_mass_gap <= 1.0:
+            raise HonestyError("comparison_zero_mass_gap must be in [0, 1]")
 
     def as_dict(self) -> dict[str, object]:
         """JSON-serialisable view."""
@@ -179,6 +228,8 @@ class Config:
             "splice_ratio": self.splice_ratio,
             "bootstrap_min_blocks": self.bootstrap_min_blocks,
             "bootstrap_block_size": self.bootstrap_block_size,
+            "evidence_min_conclusive_fraction": self.evidence_min_conclusive_fraction,
+            "comparison_zero_mass_gap": self.comparison_zero_mass_gap,
             "assert_no_unguarded_construction": self.assert_no_unguarded_construction,
             "guard_subset": list(self.guard_subset),
         }
@@ -311,6 +362,8 @@ class HonestyReport:
             "universe",
             "multiplicity",
             "series",
+            "evidence",
+            "comparison",
         )
 
         def wanted(name: str) -> bool:
@@ -459,6 +512,76 @@ class HonestyReport:
             if not result.series_values and not result.series_timestamps:
                 skipped.append("series")
 
+        # -- evidence presence ------------------------------------------
+        if wanted("evidence"):
+            if result.observations:
+                eg = _find_evidence(guards) or EvidenceGuard(
+                    min_conclusive_fraction=cfg.evidence_min_conclusive_fraction,
+                )
+                # The ResultSet-level negative claim is applied to whichever
+                # guard resolves, including a caller-supplied one. Dropping it
+                # when the caller passed their own instance would silently relax
+                # a refusal that depends on it -- a wiring choice must not be
+                # able to change the verdict, and this is exactly how the
+                # Sourcegraph failure would slip back in.
+                negative_claim = result.negative_claim or eg.negative_claim
+                er = eg.run(
+                    result.observations,
+                    controls=result.control_observations,
+                    claimed_absent=result.claimed_absent or None,
+                )
+                findings.extend(er.findings)
+                ran.append("evidence")
+                payload["evidence"] = {
+                    **er.as_dict(),
+                    "negative_claim": negative_claim,
+                }
+            else:
+                skipped.append("evidence")
+
+        # -- comparison predicates --------------------------------------
+        if wanted("comparison"):
+            if (
+                result.cohort_population is not None
+                and result.benchmark_population is not None
+            ):
+                cg = _find_comparison(guards) or ComparisonGuard(
+                    zero_mass_gap_threshold=cfg.comparison_zero_mass_gap
+                )
+                pr = cg.run(
+                    result.cohort_population,
+                    result.benchmark_population,
+                )
+                extra_findings = _shared_predicate_findings(
+                    result.comparison_predicate,
+                    result.cohort_population,
+                    result.benchmark_population,
+                )
+                combined = (*pr.findings, *extra_findings)
+                findings.extend(combined)
+                ran.append("comparison")
+                # The payload is built from the *combined* findings, not from
+                # `pr` alone. A payload whose own ``verdict`` field reads
+                # CERTIFIED while the report around it is REFUSED is a
+                # machine-readable overstatement, and it is the single worst
+                # place for one in a library about not overstating evidence.
+                payload["comparison"] = {
+                    **pr.as_dict(),
+                    "findings": [f.as_dict() for f in combined],
+                    "comparable": not any(
+                        f.severity is Severity.BLOCKING for f in combined
+                    ),
+                    "verdict": (
+                        Verdict.CERTIFIED.value
+                        if not any(f.severity is Severity.BLOCKING for f in combined)
+                        else Verdict.REFUSED.value
+                    ),
+                    "shared_predicate_declared": result.comparison_predicate is not None,
+                    "n_shared_predicate_findings": len(extra_findings),
+                }
+            else:
+                skipped.append("comparison")
+
         # -- aggregate --------------------------------------------------
         if not ran:
             findings.append(
@@ -551,6 +674,57 @@ def _find_universe(guards: Sequence[object] | None) -> UniverseGuard | None:
 
 def _find_series(guards: Sequence[object] | None) -> SeriesGuard | None:
     return _typed_guard(guards, SeriesGuard)
+
+
+def _find_evidence(guards: Sequence[object] | None) -> EvidenceGuard | None:
+    return _typed_guard(guards, EvidenceGuard)
+
+
+def _find_comparison(guards: Sequence[object] | None) -> ComparisonGuard | None:
+    return _typed_guard(guards, ComparisonGuard)
+
+
+def _shared_predicate_findings(
+    shared: Predicate | None,
+    cohort: Population,
+    benchmark: Population,
+) -> tuple[Finding, ...]:
+    """Check each side against the one predicate the run claims to have used.
+
+    This is the extra step that makes the comparison guard hard to satisfy by
+    accident. A caller can declare two matching predicates that match *each
+    other* while neither is the rule the run actually used. Passing the shared
+    predicate in as well pins the declaration to a third, independent statement
+    of intent, and it is compared by name and by clause set.
+    """
+    if shared is None:
+        return ()
+    out: list[Finding] = []
+    for population in (cohort, benchmark):
+        declared = population.predicate
+        if declared.name == shared.name and declared.clause_set == shared.clause_set:
+            continue
+        out.append(
+            Finding(
+                code=DIVERGENT_PREDICATE_FAILURE,
+                message=(
+                    f"{population.name!r} declares predicate {declared.name!r} "
+                    f"but the run states the shared predicate was {shared.name!r}; "
+                    "a declaration that does not match the rule the run says it "
+                    "used is not evidence that the two sides shared a selection"
+                ),
+                status=Status.FAIL,
+                severity=Severity.BLOCKING,
+                detail={
+                    "side": population.name,
+                    "declared_predicate": declared.name,
+                    "shared_predicate": shared.name,
+                    "declared_clauses": "; ".join(declared.normalized),
+                    "shared_clauses": "; ".join(shared.normalized),
+                },
+            )
+        )
+    return tuple(out)
 
 
 def _typed_guard(

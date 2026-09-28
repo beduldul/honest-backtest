@@ -186,6 +186,8 @@ def test_guard_subcommand_renders_a_fixture(capsys: pytest.CaptureFixture[str]) 
         ("universe", "REFUSED"),
         ("multiplicity", "REFUSED"),
         ("series", "REFUSED"),
+        ("evidence", "REFUSED"),
+        ("comparison", "REFUSED"),
     ):
         code = main([name])
         out = capsys.readouterr().out
@@ -218,6 +220,16 @@ def test_guard_subcommand_reproduce_headline_numbers(
     main(["windows", "--json"])
     windows = json.loads(capsys.readouterr().out)
     assert windows["independent_count"] == 0
+
+    main(["evidence", "--json"])
+    evidence = json.loads(capsys.readouterr().out)
+    assert evidence["fixture"] == "pypi_scan_503"
+    assert evidence["n_unknown"] >= 5, "the 503s the scan called absent"
+
+    main(["comparison", "--json"])
+    comparison = json.loads(capsys.readouterr().out)
+    assert comparison["fixture"] == "nested_four_split_asymmetry"
+    assert comparison["same_clauses"] is False
 
 
 def test_guard_restriction_is_recorded(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -15,11 +15,31 @@ module                           real failure it caught
 :mod:`~.universe`                cohort filtered for staleness, benchmark not
 :mod:`~.multiplicity`            341 configurations, ~17 expected false positives
 :mod:`~.series`                  -24,046 pp fabricated daily return across a splice
+:mod:`~.evidence`                5 package names written down as 404 on a 503;
+                                 a code search returning 0 read as "nobody does
+                                 this" while ``numba`` also returned 1
+:mod:`~.comparison`              declared predicates differed and a false
+                                 "POSITIVE 4/4 splits" was reported
 ===============================  ==============================================
 """
 
 from __future__ import annotations
 
+from .comparison import (
+    ComparisonGuard,
+    Population,
+    Predicate,
+    PredicateAuditReport,
+    undeclared_population,
+)
+from .evidence import (
+    DEFAULT_CODE_CLASSES,
+    EvidenceClass,
+    EvidenceGuard,
+    EvidenceReport,
+    Observation,
+    classify_codes,
+)
 from .lookahead import LookaheadGuard, LookaheadReport, sign_consistency
 from .multiplicity import (
     ExperimentCounter,
@@ -54,6 +74,19 @@ __all__ = [
     "LookaheadGuard",
     "LookaheadReport",
     "sign_consistency",
+    # evidence presence
+    "EvidenceGuard",
+    "EvidenceReport",
+    "EvidenceClass",
+    "Observation",
+    "DEFAULT_CODE_CLASSES",
+    "classify_codes",
+    # comparison predicates
+    "ComparisonGuard",
+    "PredicateAuditReport",
+    "Predicate",
+    "Population",
+    "undeclared_population",
     # outliers / concentration
     "ConcentrationGuard",
     "ConcentrationReport",

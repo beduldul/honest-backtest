@@ -64,3 +64,27 @@ def spliced_metrics() -> dict[str, object]:
 def clean_control() -> dict[str, object]:
     """A genuinely clean setup that must be CERTIFIED."""
     return fixtures.clean_control()
+
+
+@pytest.fixture()
+def evidence_broken() -> dict[str, object]:
+    """The 503-read-as-404 scan: five names recorded absent, one present."""
+    return fixtures.evidence_negative_evidence()
+
+
+@pytest.fixture()
+def evidence_corrected() -> dict[str, object]:
+    """The corrected three-state scan: nine genuine 404s, two honest UNKNOWNs."""
+    return fixtures.evidence_corrected()
+
+
+@pytest.fixture()
+def comparison_broken() -> dict[str, object]:
+    """The cohort/benchmark asymmetry behind the retracted "POSITIVE 4/4"."""
+    return fixtures.comparison_asymmetric()
+
+
+@pytest.fixture()
+def comparison_clean() -> dict[str, object]:
+    """Both populations through one shared declared predicate."""
+    return fixtures.comparison_shared()

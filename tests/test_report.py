@@ -305,3 +305,221 @@ def test_certification_is_a_type_not_a_boolean() -> None:
     assert cert.certified is False
     assert cert.usable is False  # REFUSED is not usable
     assert len(cert.reasons) >= 1
+
+
+# ---------------------------------------------------------------------------
+# the two guards added for the 2026-09-28 failures, through the aggregator
+# ---------------------------------------------------------------------------
+
+
+def test_the_503_scan_is_refused_by_the_aggregator() -> None:
+    """Guard 7 in the pipeline: the broken scan refuses the whole report.
+
+    Nothing else is supplied, so the evidence guard is the only one that can
+    run -- and running it alone has to be enough to refuse. A guard that only
+    speaks when six others are present is not a guard.
+    """
+    rows = fixtures.PYPI_SCAN_503["observations"]
+    assert isinstance(rows, list)
+    from honest_backtest.guards.evidence import Observation
+
+    report = HonestyReport.run(
+        ResultSet(
+            name="pypi_scan_503",
+            observations=tuple(
+                Observation(subject=str(s), code=str(c)) for s, _exists, c in rows
+            ),
+            claimed_absent=tuple(str(s) for s, exists, _ in rows if exists is False),
+            negative_claim="non-200 means absent",
+        )
+    )
+    assert report.verdict is Verdict.REFUSED
+    assert "evidence" in report.ran_guards
+    assert "EVIDENCE_ABSENCE_FROM_NON_NOTFOUND" in report.failure_codes()
+    assert report.payload["evidence"]["n_unknown"] > 0  # type: ignore[index]
+
+
+def test_the_corrected_scan_certifies_through_the_aggregator() -> None:
+    """Guard 7's clean direction: the corrected scan must not be refused.
+
+    This is the anti-rejection-machine test for the new guard. The corrected
+    scan is a real artifact with real absences in it; if the aggregator refused
+    it, the guard would be refusing absence itself rather than refusing
+    *unclean* absence, and it would be worthless.
+    """
+    from honest_backtest.guards.evidence import Observation
+
+    rows = fixtures.PYPI_THREE_STATE_CORRECTED["observations"]
+    assert isinstance(rows, list)
+    report = HonestyReport.run(
+        ResultSet(
+            name="pypi_three_state_corrected",
+            observations=tuple(
+                Observation(subject=str(s), code=str(state).upper())
+                for s, state, _code in rows
+            ),
+            control_observations=(Observation(subject="control", code="200"),),
+        )
+    )
+    assert report.verdict is Verdict.CERTIFIED
+    assert "evidence" in report.ran_guards
+    assert report.failure_codes() == ()
+    report.require_certified()  # the one line a consumer needs
+
+
+def test_the_asymmetric_comparison_is_refused_by_the_aggregator() -> None:
+    """Guard 8 in the pipeline: the retracted 4/4 result refuses."""
+    spec = fixtures.NESTED_FOUR_SPLIT_ASYMMETRY
+    rows = spec["splits"]
+    assert isinstance(rows, list)
+    from honest_backtest.guards.comparison import Population, Predicate
+
+    cohort = Population(
+        name="cohort",
+        predicate=Predicate(
+            name=str(spec["cohort_predicate"]),
+            clauses=tuple(spec["cohort_clauses"]),  # type: ignore[arg-type]
+            ordered=True,
+        ),
+        size=int(rows[-1][2]),
+    )
+    benchmark = Population(
+        name="benchmark",
+        predicate=Predicate(
+            name=str(spec["benchmark_predicate"]),
+            clauses=tuple(spec["benchmark_clauses"]),  # type: ignore[arg-type]
+            ordered=True,
+        ),
+        size=int(rows[-1][2]),
+    )
+    report = HonestyReport.run(
+        ResultSet(
+            name="nested_four_split_asymmetry",
+            cohort_population=cohort,
+            benchmark_population=benchmark,
+        )
+    )
+    assert report.verdict is Verdict.REFUSED
+    assert "comparison" in report.ran_guards
+    assert "COMPARISON_DIVERGENT_PREDICATE" in report.failure_codes()
+
+
+def test_a_shared_predicate_comparison_certifies_through_the_aggregator() -> None:
+    """Guard 8's clean direction: one shared predicate is not refused.
+
+    The comparison guard must key on *divergence*, not on the act of comparing
+    two populations. If it refused every comparison, it would be forbidding
+    the thing the library exists to make safe.
+    """
+    from honest_backtest.guards.comparison import Population, Predicate
+
+    shared = Predicate(
+        name="eligible_as_of",
+        clauses=("history_days >= 30", "not stale", "not frozen as of split_ts"),
+        ordered=True,
+    )
+    report = HonestyReport.run(
+        ResultSet(
+            name="shared_predicate_control",
+            cohort_population=Population("cohort", shared, 20),
+            benchmark_population=Population("benchmark", shared, 2000),
+            comparison_predicate=shared,
+        )
+    )
+    assert report.verdict is Verdict.CERTIFIED
+    assert "comparison" in report.ran_guards
+    assert report.failure_codes() == ()
+
+
+def test_a_declaration_that_contradicts_the_shared_predicate_is_refused() -> None:
+    """Passing a shared predicate pins the declaration to a third statement.
+
+    Two sides can agree with each other while neither is the rule the run says
+    it used. Supplying ``comparison_predicate`` compares each declaration to
+    that statement as well, so "we both did X" cannot be asserted about a run
+    whose stated rule was Y.
+    """
+    from honest_backtest.guards.comparison import Population, Predicate
+
+    stated = Predicate("eligible_as_of", ("not stale",), ordered=True)
+    liar = Predicate("eligible_as_of", ("history_days >= 30",), ordered=True)
+    report = HonestyReport.run(
+        ResultSet(
+            name="contradicted_declaration",
+            cohort_population=Population("cohort", liar, 20),
+            benchmark_population=Population("benchmark", liar, 20),
+            comparison_predicate=stated,
+        )
+    )
+    assert report.verdict is Verdict.REFUSED
+    assert "COMPARISON_DIVERGENT_PREDICATE" in report.failure_codes()
+
+
+def test_both_new_guards_appear_in_the_guard_set() -> None:
+    """The guard set is the contract; a guard outside it never runs."""
+    report = HonestyReport.run(
+        ResultSet(name="empty_but_for_this_one_guard", trade_pnls=(1.0, -1.0, 2.0, 0.5))
+    )
+    skipped = set(report.skipped_guards)
+    assert {"evidence", "comparison"} <= skipped, (
+        "a guard with no inputs must be recorded as skipped, not silently absent"
+    )
+
+
+def test_the_comparison_payload_cannot_contradict_the_report() -> None:
+    """A REFUSED report must not ship a payload field reading CERTIFIED.
+
+    Regression: the first draft built ``payload['comparison']`` from the guard's
+    own report, which does not see the shared-predicate findings the aggregator
+    adds. The payload then said ``verdict: CERTIFIED`` inside a ``REFUSED``
+    report -- machine-readable overstatement, in the worst possible place.
+    """
+    from honest_backtest.guards.comparison import Population, Predicate
+
+    stated = Predicate("eligible_as_of", ("not stale",), ordered=True)
+    liar = Predicate("eligible_as_of", ("history_days >= 30",), ordered=True)
+    report = HonestyReport.run(
+        ResultSet(
+            name="contradicted_declaration",
+            cohort_population=Population("cohort", liar, 20),
+            benchmark_population=Population("benchmark", liar, 20),
+            comparison_predicate=stated,
+        )
+    )
+    assert report.verdict is Verdict.REFUSED
+    payload = report.payload["comparison"]
+    assert isinstance(payload, dict)
+    assert payload["verdict"] == "REFUSED", (
+        "the payload's own verdict must agree with the report it belongs to"
+    )
+    assert payload["comparable"] is False
+    assert payload["n_shared_predicate_findings"] == 2
+    assert len(payload["findings"]) == 2  # type: ignore[arg-type]
+    assert payload["shared_predicate_declared"] is True
+
+
+def test_a_caller_supplied_evidence_guard_does_not_drop_the_negative_claim() -> None:
+    """A wiring choice must not silently relax a refusal.
+
+    Regression: passing ``guards=[EvidenceGuard()]`` short-circuited the
+    ``or``, so ``ResultSet.negative_claim`` was discarded and a REFUSED
+    situation became SUSPECT with no finding or note.
+    """
+    from honest_backtest.guards.evidence import EvidenceGuard, Observation
+
+    result = ResultSet(
+        name="null_scan",
+        observations=(Observation("a", "503"), Observation("b", "503")),
+        negative_claim="nothing was found",
+    )
+    default = HonestyReport.run(result)
+    with_custom_guard = HonestyReport.run(result, guards=[EvidenceGuard()])
+
+    assert default.verdict is Verdict.REFUSED
+    assert with_custom_guard.verdict is Verdict.REFUSED, (
+        "the caller's own guard instance must not relax the verdict"
+    )
+    assert default.failure_codes() == with_custom_guard.failure_codes()
+    payload = with_custom_guard.payload["evidence"]
+    assert isinstance(payload, dict)
+    assert payload["negative_claim"] == "nothing was found"

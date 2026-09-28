@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import sys
 
+from honest_backtest.guards.comparison import Population, Predicate
+from honest_backtest.guards.evidence import Observation
 from honest_backtest.guards.windows import WindowPlan
 from honest_backtest.plans import Window
 from honest_backtest.report import Config, HonestyReport, ResultSet
@@ -66,6 +68,36 @@ def main() -> int:
         window_excesses=WINDOW_EXCESSES,
         win_count=WIN_COUNT,
         window_plan=WALK_FORWARD,
+        # The evidence behind the "no prior art" claim: a code search that
+        # returned nothing, including for a term that is everywhere.
+        observations=(
+            Observation(subject="def sharpe_ratio [lang:python]", code="0"),
+            Observation(subject="numba", code="1"),
+        ),
+        claimed_absent=("def sharpe_ratio [lang:python]",),
+        negative_claim="nobody has implemented this, so there is no prior art",
+        # The comparison behind the "beats the benchmark" claim: two declared
+        # predicates that are not the same rule.
+        cohort_population=Population(
+            name="cohort",
+            predicate=Predicate(
+                name="eligible_as_of",
+                clauses=("history_days >= 30", "not stale", "not frozen as of split_ts"),
+                ordered=True,
+            ),
+            size=3151,
+            forward_returns=(5.0, -2.0, 0.0, 8.5),
+        ),
+        benchmark_population=Population(
+            name="benchmark",
+            predicate=Predicate(
+                name="benchmark_filter",
+                clauses=("history_days >= 30",),
+                ordered=True,
+            ),
+            size=3151,
+            forward_returns=(0.0, 0.0, 0.0, 0.0, 0.0, 5.0, -2.0, 0.0),
+        ),
     )
 
     print("=" * 72)
@@ -74,6 +106,8 @@ def main() -> int:
     print("  predictor spread        : +0.1344  (significant at p < 0.001)")
     print("  evaluation windows won  : 9 of 12")
     print("  walk-forward splits     : 4")
+    print("  prior art               : 'none found' (the search tool returned 0)")
+    print("  benchmark               : 'same universe as the cohort'")
     print("  declared verdict        : THIS IS AN EDGE")
     print()
 

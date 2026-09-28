@@ -222,6 +222,13 @@ def test_only_row_carrying_fixtures_claim_measured() -> None:
     """
     row_carrying = {
         "copier_pnl", "roi", "zero_padded_inception", "left_edge_bar",
+        # The evidence-presence pair carries the archive's own status/outcome
+        # codes, transcribed from /tmp/pypi_fixed.json and /tmp/pypi_scan.json.
+        # These are observation rows -- one per probe -- in exactly the sense
+        # the other four are: the values are the artifact's, not solved to make
+        # the guard fire. The broken one is the *negative* fixture, and its rows
+        # are just as real as the corrected one's.
+        "pypi_three_state_corrected", "pypi_scan_503",
     }
     for name, label in fixtures.PROVENANCE.items():
         if label == "MEASURED":
@@ -291,3 +298,162 @@ def test_provenance_is_exposed_on_the_builders() -> None:
         assert payload["provenance"] == "MEASURED"
         assert payload["provenance_ok"] is True
         assert isinstance(payload["source"], str)
+
+
+# ---------------------------------------------------------------------------
+# the 2026-09-28 evidence-presence fixtures
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_pair_is_labelled_measured() -> None:
+    """Both directions of the 503 failure are transcribed artifact rows.
+
+    The broken scan and the corrected scan are the same probe run twice, and
+    both artifacts survive on disk. Labelling the broken one as illustrative
+    because it is *wrong* would confuse "this is not real data" with "this data
+    shows a mistake" -- the mistake is exactly what makes it worth keeping.
+    """
+    assert fixtures.PROVENANCE["pypi_scan_503"] == "MEASURED"
+    assert fixtures.PROVENANCE["pypi_three_state_corrected"] == "MEASURED"
+    for name in ("pypi_scan_503", "pypi_three_state_corrected"):
+        source = str(fixtures._FIXTURE_DATA[name]["source"])
+        assert "/tmp/pypi" in source, "a MEASURED label must cite the artifact path"
+
+
+def test_the_code_search_fixture_is_illustrative_and_says_why() -> None:
+    """The control-query counts could not be recovered, so they are labelled.
+
+    This is the honest half of the brief: the narrative records the queries,
+    but no captured output of them was found on disk, so the two counts are
+    illustrative and the fixture says so rather than borrowing the credibility
+    of the neighbouring MEASURED fixtures.
+    """
+    assert fixtures.PROVENANCE["code_search_null_without_control"] == "ILLUSTRATIVE"
+    source = str(fixtures._FIXTURE_DATA["code_search_null_without_control"]["source"])
+    assert "NOT persisted" in source or "not persisted" in source
+    assert "illustrative" in source
+
+
+def test_the_asymmetry_fixture_is_measured_design_not_measured() -> None:
+    """The design and split aggregates are the study's; the subject rows are not.
+
+    Same standard the library already applies to ``nested_four_split``: a real
+    design must not be silently upgraded to real data, and this fixture carries
+    four transcribed per-split aggregates *and* a population whose members are
+    representative counts. MEASURED_DESIGN is the label that says both things.
+    """
+    assert fixtures.PROVENANCE["nested_four_split_asymmetry"] == "MEASURED_DESIGN"
+    spec = fixtures._FIXTURE_DATA["nested_four_split_asymmetry"]
+    source = str(spec["source"])
+    assert "6.2" in source, "must cite the retraction table it transcribes"
+    assert "illustrative" in source or "design" in source
+
+
+def test_the_dormant_zeros_are_illustrative() -> None:
+    """The zero-mass numbers feed a heuristic and are labelled as such.
+
+    The *rule* that a dormant subject returns a flat 0.0 is real and is cited;
+    the per-subject returns are not persisted, so they are constructed. A
+    heuristic fed by invented rows is doubly weak and the fixture says so.
+    """
+    assert fixtures.PROVENANCE["dormant_zero_forward_returns"] == "ILLUSTRATIVE"
+
+
+def test_the_broken_scan_keeps_all_five_of_its_503s() -> None:
+    """The defect's own rows, verbatim: five 503s recorded as absence.
+
+    Dropping any of them would understate the failure, and the fixture is the
+    test's evidence for how large it was.
+    """
+    rows = fixtures.PYPI_SCAN_503["observations"]
+    assert isinstance(rows, list)
+    assert [r[0] for r in rows if r[2] == "503"] == [
+        "pbo", "cscv", "overfit", "probabilistic-sharpe", "backtest-overfit",
+    ]
+    assert fixtures.PYPI_SCAN_503["n_observations"] == len(rows)
+
+
+def test_the_broken_scan_does_not_invent_a_status_for_its_successes() -> None:
+    """The artifact wrote ``code`` only on the error path.
+
+    Recording those rows as ``"200"`` would invent a field the artifact never
+    had -- a small tidy fabrication, in a fixture whose subject is a small tidy
+    fabrication. The rows say what was actually recorded.
+    """
+    rows = fixtures.PYPI_SCAN_503["observations"]
+    assert isinstance(rows, list)
+    for _subject, exists, code in rows:
+        if exists is True:
+            assert code == "present-no-code-recorded", (
+                "a successful row must not claim a status code the artifact "
+                "never wrote"
+            )
+
+
+def test_the_corrected_scan_counts_match_its_rows() -> None:
+    """The declared totals are recomputed from the fixture's own rows.
+
+    A summary that does not add up to its rows is the overstatement this
+    library exists to catch, and it is cheap to check.
+    """
+    rows = fixtures.PYPI_THREE_STATE_CORRECTED["observations"]
+    counts = fixtures.PYPI_THREE_STATE_CORRECTED["measured_counts"]
+    assert isinstance(rows, list) and isinstance(counts, dict)
+    assert len(rows) == fixtures.PYPI_THREE_STATE_CORRECTED["n_observations"]
+    tally = {"PRESENT": 0, "ABSENT": 0, "UNKNOWN": 0}
+    for _subject, state, _code in rows:
+        tally[str(state)] += 1
+    assert tally == counts
+
+
+def test_the_corrected_scan_gained_names_the_broken_one_lost() -> None:
+    """The two fixtures are the same question, answered twice.
+
+    ``measured_correction`` tracks the *five 503s* -- the names whose absence
+    the broken scan inferred from an infrastructure failure -- not the ten
+    names it declared absent overall. Four of the five are still absent on
+    re-probe and one (``overfit``) was there all along. Keeping the sets
+    separate is deliberate: the eight genuine 404s were never in dispute, and
+    folding them in would overstate how much the correction recovered.
+    """
+    correction = fixtures.PYPI_THREE_STATE_CORRECTED["measured_correction"]
+    assert isinstance(correction, dict)
+    broken_503 = [
+        str(r[0]) for r in fixtures.PYPI_SCAN_503["observations"] if r[2] == "503"  # type: ignore[union-attr]
+    ]
+    still = correction["still_absent_after_correction"]
+    found = correction["actually_present"]
+    assert set(broken_503) == set(still) | set(found), (  # type: ignore[arg-type]
+        "every name the broken scan lost to a 503 is either still absent or "
+        "was present -- there is no third outcome"
+    )
+    assert set(found) == {"overfit"}
+    assert len(broken_503) == 5
+
+
+def test_the_broken_scan_also_misread_genuine_404s_as_the_same_thing() -> None:
+    """Eight of its ten absences were correct, which is why the defect hid.
+
+    A scan that is wrong about everything gets caught immediately. This one was
+    wrong about a third of its absences and right about the rest, and every row
+    had the same shape either way -- ``{"exists": false}``. That is what made
+    it plausible.
+    """
+    rows = fixtures.PYPI_SCAN_503["observations"]
+    assert isinstance(rows, list)
+    declared = [r[0] for r in rows if r[1] is False]
+    correct = [r[0] for r in rows if r[1] is False and r[2] == "404"]
+    assert len(declared) == 10
+    assert len(correct) == 5
+    assert sorted(set(declared) - set(correct)) == [
+        "backtest-overfit", "cscv", "overfit", "pbo", "probabilistic-sharpe",
+    ]
+
+
+def test_both_new_guards_have_a_fixture_registered() -> None:
+    """A guard without a registered fixture cannot be run from the CLI."""
+    for guard in ("evidence", "comparison"):
+        assert guard in fixtures.GUARD_FIXTURES
+        payload = fixtures.GUARD_FIXTURES[guard]()
+        assert "verdict" in payload
+        assert payload["provenance"] in VALID_LABELS

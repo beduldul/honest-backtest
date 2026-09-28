@@ -251,6 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("universe", "cohort/benchmark predicate symmetry"),
         ("multiplicity", "family-wise error accounting"),
         ("series", "splice, padding and index contiguity"),
+        ("evidence", "provenance of negative evidence (never read an error as absence)"),
+        ("comparison", "declared predicate symmetry between two populations"),
     ):
         g = sub.add_parser(name, help=helptext)
         g.add_argument("--json", action="store_true", help="emit machine-readable JSON")

@@ -24,7 +24,7 @@ Quick start::
     print(report.verdict)          # Verdict.REFUSED
     report.require_certified()     # raises RefusedError
 
-See ``README.md`` for the eight documented failures each guard reproduces.
+See ``README.md`` for the ten documented failures each guard reproduces.
 Some are measured and some are constructed to show a mechanism; each fixture
 states which (``honest_backtest.fixtures.PROVENANCE``), and
 ``fixtures.provenance()`` audits the labels.
@@ -82,6 +82,8 @@ def __getattr__(name: str) -> object:
         "UniverseGuard",
         "MultiplicityGuard",
         "SeriesGuard",
+        "EvidenceGuard",
+        "ComparisonGuard",
     }:
         from . import guards
 

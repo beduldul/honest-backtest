@@ -43,6 +43,8 @@ def test_examples_exist() -> None:
         "bootstrap.py",
         "refused_report.py",
         "clean_control.py",
+        "evidence.py",
+        "comparison.py",
     ):
         assert expected in SCRIPTS, f"missing example: {expected}"
 
@@ -166,11 +168,13 @@ def test_multiplicity_example_reproduces_seventeen_point_zero_five() -> None:
 
 
 def test_refused_report_example_shows_a_refusal_with_all_guards() -> None:
-    """The capstone: four rules fire at once and the result is refused."""
+    """The capstone: six rules fire at once and the result is refused."""
     out = run_example("refused_report.py").stdout
     assert "LOOKAHEAD_DISTANCE_DECAY" in out
     assert "CONCENTRATION_MIXED_SIGNS" in out
     assert "WINDOWS_FULLY_NESTED" in out
+    assert "EVIDENCE_ABSENCE_FROM_NON_NOTFOUND" in out
+    assert "COMPARISON_DIVERGENT_PREDICATE" in out
     assert "REFUSED. This result cannot be reported as a finding." in out
 
 
@@ -180,3 +184,55 @@ def test_clean_control_example_proves_discrimination() -> None:
     assert "CERTIFIED" in out
     assert "require_certified() did not raise" in out
     assert "not a machine that rejects everything" in out
+
+
+def test_evidence_example_shows_both_directions() -> None:
+    """The example must refuse the broken scan *and* certify the corrected one.
+
+    An example that showed only the refusal would teach half the lesson: the
+    difference between the two runs is entirely in how each wrote down a
+    failure, and that is the finding.
+    """
+    out = run_example("evidence.py").stdout
+    assert "pbo" in out and "code=503" in out
+    assert "EVIDENCE_ABSENCE_FROM_NON_NOTFOUND" in out
+    assert "REFUSED" in out
+    assert "CERTIFIED" in out
+    assert "overfit" in out, "the name that was there all along"
+    assert "was there the whole time" in out
+
+
+def test_evidence_example_quotes_the_real_scan_rows() -> None:
+    """The five 503s are the artifact's, and all five must be printed."""
+    out = run_example("evidence.py").stdout
+    for name in ("pbo", "cscv", "overfit", "probabilistic-sharpe", "backtest-overfit"):
+        assert name in out
+
+
+def test_comparison_example_shows_both_directions() -> None:
+    """Refuse the asymmetry, certify the shared predicate."""
+    out = run_example("comparison.py").stdout
+    assert "COMPARISON_DIVERGENT_PREDICATE" in out
+    assert "POSITIVE 4/4 splits" in out, "the retracted claim, in its own words"
+    assert "REFUSED" in out
+    assert "CERTIFIED" in out
+
+
+def test_comparison_example_states_the_limits_of_the_guard() -> None:
+    """The example must not oversell the instrument.
+
+    The guard reads declarations, not values, and the example says so where a
+    reader will see it -- next to the output, not in a footnote.
+    """
+    out = run_example("comparison.py").stdout
+    assert "CANNOT" in out
+    assert "recover the rule from the numbers" in out
+    assert "heuristic, not proof" in out
+
+
+def test_comparison_example_reproduces_the_retraction_table() -> None:
+    """The four split aggregates are the study's, printed column by column."""
+    out = run_example("comparison.py").stdout
+    for value in ("-330.4", "-452.6", "-510.7", "-1135.7"):
+        assert value in out, f"missing measured cohort mean {value}"
+    assert "0 independent windows" in out

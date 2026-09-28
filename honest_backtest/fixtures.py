@@ -106,6 +106,11 @@ __all__ = [
     "LEFT_EDGE_BAR",
     "TRADE_LEVEL_FALSE_POSITIVE",
     "CLEAN_CONTROL",
+    "PYPI_THREE_STATE_CORRECTED",
+    "PYPI_SCAN_503",
+    "CODE_SEARCH_NULL_WITHOUT_CONTROL",
+    "NESTED_FOUR_SPLIT_ASYMMETRY",
+    "DORMANT_ZERO_FORWARD_RETURNS",
     "GUARD_FIXTURES",
     "PROVENANCE",
     "PROVENANCE_MEASURED",
@@ -128,6 +133,11 @@ __all__ = [
     "trade_level_false_positive",
     "clean_control",
     "clean_series",
+    "evidence_negative_evidence",
+    "evidence_corrected",
+    "evidence_null_without_control",
+    "comparison_asymmetric",
+    "comparison_shared",
 ]
 
 # ---------------------------------------------------------------------------
@@ -938,7 +948,469 @@ def _naive_trade_ci(
 
 
 # ---------------------------------------------------------------------------
-# 8. the clean control
+# 8. evidence presence: the 503 read as a 404
+# ---------------------------------------------------------------------------
+
+#: The corrected three-state package-availability scan: fifteen PRESENT, eight
+#: genuine 404s, and two recorded honestly as ``UNKNOWN`` rather than as absent.
+#:
+#: ``PROVENANCE = "MEASURED"``. The twenty-five observations are transcribed from
+#: ``/tmp/pypi_fixed.json``, the artifact the corrected scan wrote on
+#: 2026-09-28, which classified each name as ``PRESENT`` (HTTP 200), ``ABSENT``
+#: (HTTP 404 from both endpoints after retries) or ``UNKNOWN`` (everything
+#: else). Every ``code`` below is that file's own ``code`` field, and the row
+#: order is that file's own order; nothing was rounded, tidied, or inferred.
+#:
+#: The two ``UNKNOWN`` rows are the ones the earlier scan got wrong in the
+#: opposite direction from what one might expect: ``overfit-diagnostic`` and
+#: ``purgekit`` produced *404s that the corrected run still refused to call
+#: absent*, because a 404 from a single endpoint is not a resolution when the
+#: other endpoint never answered. That is the honest reading and it is preserved
+#: verbatim, including the fact that it makes the corrected scan less decisive
+#: than a naive pass over the same bytes would be.
+#:
+#: This fixture is the *clean* direction: it must not be refused.
+PYPI_THREE_STATE_CORRECTED: dict[str, object] = {
+    "name": "pypi_three_state_corrected",
+    "provenance": "MEASURED",
+    "source": "/tmp/pypi_fixed.json (scan run 2026-09-28, artifact /tmp/pypi_fix.py)",
+    "scanned_on": date(2026, 9, 28),
+    "n_observations": 25,
+    "measured_counts": {"PRESENT": 15, "ABSENT": 8, "UNKNOWN": 2},
+    # (subject, state as the artifact recorded it, the artifact's own code)
+    "observations": [
+        ("pbo", "ABSENT", "404"),
+        ("cscv", "ABSENT", "404"),
+        ("overfit", "PRESENT", "200"),
+        ("backtest-overfitting", "ABSENT", "404"),
+        ("deflated-sharpe", "PRESENT", "200"),
+        ("probabilistic-sharpe", "ABSENT", "404"),
+        ("pypbo", "ABSENT", "404"),
+        ("quantstats", "PRESENT", "200"),
+        ("mlfinlab", "PRESENT", "200"),
+        ("skfolio", "PRESENT", "200"),
+        ("vectorbt", "PRESENT", "200"),
+        ("bt", "PRESENT", "200"),
+        ("backtrader", "PRESENT", "200"),
+        ("empyrical", "PRESENT", "200"),
+        ("quantstats-lumi", "PRESENT", "200"),
+        ("freqtrade", "PRESENT", "200"),
+        ("deflated_sharpe", "PRESENT", "200"),
+        ("probabilistic_sharpe_ratio", "ABSENT", "404"),
+        ("pyfolio", "PRESENT", "200"),
+        ("riskfolio-lib", "PRESENT", "200"),
+        ("pypbo-cscv", "ABSENT", "404"),
+        ("backtest-overfit", "ABSENT", "404"),
+        # The two the corrected run refused to resolve, recorded as such.
+        ("overfit-diagnostic", "UNKNOWN", "404"),
+        ("purgekit", "UNKNOWN", "404"),
+        ("skepsis", "PRESENT", "200"),
+    ],
+    # The five names the earlier draft listed as absent, four of which resolve.
+    "measured_correction": {
+        "declared_absent_by_broken_scan": ["pbo", "cscv", "overfit", "probabilistic-sharpe",
+                                           "backtest-overfit"],
+        "still_absent_after_correction": ["pbo", "cscv", "probabilistic-sharpe",
+                                          "backtest-overfit"],
+        "actually_present": ["overfit"],
+    },
+}
+
+#: The broken scan: 503s written down as ``{"exists": false}``.
+#:
+#: ``PROVENANCE = "MEASURED"``. Transcribed from ``/tmp/pypi_scan.json``, the
+#: artifact of the defect. Five names returned HTTP 503 and the scan recorded
+#: each of them as absent -- ``pbo``, ``cscv``, ``overfit``,
+#: ``probabilistic-sharpe`` and ``backtest-overfit``. One of them (``overfit``)
+#: is present on PyPI; the corrected scan above resolves it to ``PRESENT``.
+#:
+#: One transcription note, because it matters: the artifact's *successful* rows
+#: carry **no** ``code`` field at all -- the scan wrote ``code`` only on the
+#: error path, which is itself part of how the two outcomes came to look alike.
+#: Those rows are recorded below with the code ``"present-no-code-recorded"``
+#: rather than ``"200"``. Writing ``"200"`` would have been a small, tidy
+#: fabrication in a fixture whose entire subject is a small tidy fabrication,
+#: and the guard classifies an unrecognised code as ``UNKNOWN``, which is the
+#: honest reading of "the artifact never said".
+#:
+#: This is the *broken* direction: the guard must refuse it.
+PYPI_SCAN_503: dict[str, object] = {
+    "name": "pypi_scan_503",
+    "provenance": "MEASURED",
+    "source": "/tmp/pypi_scan.json (scan run 2026-09-28, artifact /tmp/pypi_scan.py)",
+    "scanned_on": date(2026, 9, 28),
+    "n_observations": 22,
+    # (subject, the scan's `exists` verdict, the code field it recorded)
+    # 503 rows first: these are the defect, verbatim.
+    "observations": [
+        ("pbo", False, "503"),
+        ("cscv", False, "503"),
+        ("overfit", False, "503"),
+        ("backtest-overfitting", False, "404"),
+        ("deflated-sharpe", True, "present-no-code-recorded"),
+        ("probabilistic-sharpe", False, "503"),
+        ("pypbo", False, "404"),
+        ("quantstats", True, "present-no-code-recorded"),
+        ("mlfinlab", False, "404"),
+        ("skfolio", True, "present-no-code-recorded"),
+        ("vectorbt", True, "present-no-code-recorded"),
+        ("bt", True, "present-no-code-recorded"),
+        ("backtrader", True, "present-no-code-recorded"),
+        ("empyrical", True, "present-no-code-recorded"),
+        ("quantstats-lumi", True, "present-no-code-recorded"),
+        ("freqtrade", True, "present-no-code-recorded"),
+        ("deflated_sharpe", True, "present-no-code-recorded"),
+        ("probabilistic_sharpe_ratio", False, "404"),
+        ("pyfolio", True, "present-no-code-recorded"),
+        ("riskfolio-lib", True, "present-no-code-recorded"),
+        ("pypbo-cscv", False, "404"),
+        ("backtest-overfit", False, "503"),
+    ],
+    # The blanket claim the broken scan supported, stated as the claim it was.
+    "measured_claim": "the names that returned a non-200 are absent from PyPI",
+}
+
+#: A code-search instrument whose control queries prove it was broken.
+#:
+#: ``PROVENANCE = "ILLUSTRATIVE"``. This is the part the brief asked to be
+#: marked honestly if the artifacts could not be found: **they were not found.**
+#: The Sourcegraph control-query result (``lang:python "def sharpe_ratio"`` ->
+#: 0, ``numba`` -> 1) is described in the study narrative but no captured output
+#: of those two queries survives on disk, so the two zero counts below are
+#: recorded as the narrative states them and the fixture is labelled
+#: ``ILLUSTRATIVE`` rather than ``MEASURED``. The *mechanism* is the finding;
+#: these two numbers are not.
+#:
+#: What is real and on disk: the decider number moved from a false **4** to
+#: **10-18** once the zeros were discarded -- recorded in
+#: ``measured_correction`` so the consequence is not lost with the evidence.
+CODE_SEARCH_NULL_WITHOUT_CONTROL: dict[str, object] = {
+    "name": "code_search_null_without_control",
+    "provenance": "ILLUSTRATIVE",
+    "source": (
+        "study narrative; the two control-query counts are NOT persisted in any "
+        "recovered artifact, so they are illustrative. Only the 4 -> 10-18 "
+        "correction is transcribed"
+    ),
+    "measured_correction": {"false_decider": 4, "corrected_decider_low": 10,
+                            "corrected_decider_high": 18},
+    # (subject, the tool's reported match count, note)
+    "observations": [
+        ("def sharpe_ratio [lang:python]", "0",
+         "the target query -- read as 'nobody does this'"),
+        ("numba", "1",
+         "the control -- a term guaranteed to appear across thousands of "
+         "repositories returning 1 match is what proves the instrument, not "
+         "the world, produced the zero"),
+    ],
+    "claimed_absent": ["def sharpe_ratio [lang:python]"],
+    "negative_claim": "no repository implements this, so there is no prior art",
+    # The control is deliberately *broken*: `numba` is a known-positive input
+    # whose probe returned a near-zero count, so it must NOT be treated as a
+    # successful control. A working control on the same instrument would be a
+    # match count in the hundreds or thousands.
+    "control_subject": "numba",
+    "control_returned": "1",
+    "expected_control_min_count": 100,
+}
+
+
+def evidence_negative_evidence() -> dict[str, object]:
+    """Run the evidence guard on the broken 503 scan (must refuse)."""
+    from .guards.evidence import EvidenceGuard, Observation
+
+    rows = PYPI_SCAN_503["observations"]
+    assert isinstance(rows, list)
+    observations = tuple(
+        Observation(subject=str(subject), code=str(code), note=f"scan said exists={exists}")
+        for subject, exists, code in rows
+    )
+    # The scan's own declaration: every non-200 row was read as absent.
+    claimed = tuple(str(subject) for subject, exists, _ in rows if exists is False)
+    report = EvidenceGuard(
+        negative_claim=str(PYPI_SCAN_503["measured_claim"]),
+        # The artifact recorded no code on its success path, so its own "found
+        # it" rows cannot be read as PRESENT without assuming the code it never
+        # wrote. Supply the one control the artifact does support: a 200 from
+        # the same endpoint, which the corrected scan recorded for these names.
+        code_classes={"PRESENT-NO-CODE-RECORDED": "UNKNOWN"},
+    ).run(
+        observations,
+        claimed_absent=claimed,
+        controls=(
+            Observation(subject="deflated-sharpe", code="200",
+                        note="known-present control (PyPI JSON API)"),
+        ),
+    )
+    return {
+        "fixture": "pypi_scan_503",
+        "provenance": PYPI_SCAN_503["provenance"],
+        "source": PYPI_SCAN_503["source"],
+        "n_observations": report.n_observations,
+        "n_present": report.n_present,
+        "n_absent": report.n_absent,
+        "n_unknown": report.n_unknown,
+        "conclusive_fraction": round(report.conclusive_fraction, 4),
+        "claimed_absent": list(claimed),
+        "verdict": report.verdict.value,
+        "findings": [f.as_dict() for f in report.findings],
+    }
+
+
+def evidence_corrected() -> dict[str, object]:
+    """Run the evidence guard on the corrected three-state scan (must pass)."""
+    from .guards.evidence import EvidenceGuard, Observation
+
+    rows = PYPI_THREE_STATE_CORRECTED["observations"]
+    assert isinstance(rows, list)
+    # The artifact's three-state vocabulary is its own: it wrote a `state` of
+    # PRESENT / ABSENT / UNKNOWN and, separately, the HTTP code it last saw.
+    # Reading only the code would lose the resolution: `overfit-diagnostic` and
+    # `purgekit` carry a bare `404` while the artifact's own state for them is
+    # `UNKNOWN`, because one endpoint answered 404 and the other never answered
+    # at all. Classifying the *state* the run recorded is the faithful reading;
+    # classifying the code would upgrade two honest unknowns to absences and
+    # make the corrected scan look more decisive than it was.
+    observations = tuple(
+        Observation(subject=str(subject), code=str(state).upper(), note=str(state))
+        for subject, state, _code in rows
+    )
+    report = EvidenceGuard().run(
+        observations,
+        controls=(
+            Observation(subject="deflated-sharpe", code="200",
+                        note="known-present positive control"),
+        ),
+    )
+    return {
+        "fixture": "pypi_three_state_corrected",
+        "provenance": PYPI_THREE_STATE_CORRECTED["provenance"],
+        "source": PYPI_THREE_STATE_CORRECTED["source"],
+        "n_observations": report.n_observations,
+        "n_present": report.n_present,
+        "n_absent": report.n_absent,
+        "n_unknown": report.n_unknown,
+        "conclusive_fraction": round(report.conclusive_fraction, 4),
+        "controlled": report.controlled,
+        "control_subject": report.control_subject,
+        "verdict": report.verdict.value,
+        "findings": [f.as_dict() for f in report.findings],
+    }
+
+
+def evidence_null_without_control() -> dict[str, object]:
+    """The code-search null: a zero read as absence, with a broken control."""
+    from .guards.evidence import EvidenceGuard, Observation
+
+    rows = CODE_SEARCH_NULL_WITHOUT_CONTROL["observations"]
+    claimed = CODE_SEARCH_NULL_WITHOUT_CONTROL["claimed_absent"]
+    assert isinstance(rows, list) and isinstance(claimed, list)
+    observations = tuple(
+        Observation(subject=str(subject), code=str(code), note=str(note))
+        for subject, code, note in rows
+    )
+    # Match counts are not status codes, so the table is declared outright: a
+    # count is PRESENT only when the instrument returned matches at all.
+    classes = {"0": "UNKNOWN", "1": "PRESENT"}
+    report = EvidenceGuard(
+        negative_claim=str(CODE_SEARCH_NULL_WITHOUT_CONTROL["negative_claim"]),
+        code_classes=classes,
+    ).run(observations, claimed_absent=tuple(str(c) for c in claimed))
+
+    # The control probe, evaluated on its own. `numba` is a known-positive
+    # input; a working search instrument returns hundreds or thousands of
+    # matches for it. Returning 1 means the instrument is broken, so this
+    # control *fails* -- and a failed control is the whole finding, not a
+    # caveat. The same near-zero code that classifies as PRESENT in the
+    # presence table (`count >= 1` means matches were returned) is a failure
+    # against the control's own expected magnitude.
+    control_count = int(CODE_SEARCH_NULL_WITHOUT_CONTROL["control_returned"])  # type: ignore[arg-type]
+    expected_min = int(CODE_SEARCH_NULL_WITHOUT_CONTROL["expected_control_min_count"])  # type: ignore[arg-type]
+    control_passed = control_count >= expected_min
+    return {
+        "fixture": "code_search_null_without_control",
+        "provenance": CODE_SEARCH_NULL_WITHOUT_CONTROL["provenance"],
+        "source": CODE_SEARCH_NULL_WITHOUT_CONTROL["source"],
+        "measured_correction": CODE_SEARCH_NULL_WITHOUT_CONTROL["measured_correction"],
+        "n_present": report.n_present,
+        "n_absent": report.n_absent,
+        "n_unknown": report.n_unknown,
+        "control_subject": CODE_SEARCH_NULL_WITHOUT_CONTROL["control_subject"],
+        "control_count": control_count,
+        "control_expected_min": expected_min,
+        "control_passed": control_passed,
+        "verdict": report.verdict.value,
+        "findings": [f.as_dict() for f in report.findings],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 9. shared selection predicate: the false "POSITIVE 4/4 splits"
+# ---------------------------------------------------------------------------
+#: The nested four-split design, with the cohort/benchmark asymmetry in it.
+#:
+#: ``PROVENANCE = "MEASURED_DESIGN"``, and the same label as
+#: :data:`NESTED_FOUR_SPLIT` because it is the same design: the four splits, the
+#: shared end date of 2026-09-28 and the two-tag eligibility rule are the
+#: study's, preserved in ``NESTED_FOUR_SPLIT``. The per-split cohort and
+#: benchmark aggregates are transcribed from the retraction table in
+#: ``copytrade/README.md`` section 6.2 (``bench`` 18.3 / 26.1 / 16.0 / 11.7 and
+#: ``mean_fwd`` -330.4 / -452.6 / -510.7 / -1135.7), which are real reported
+#: figures for that run, and ``excess`` reproduces them by subtraction.
+#:
+#: The four *subjects* are not archive rows -- no per-subject table survives for
+#: that run -- so the population members below are representative counts
+#: (``eligible`` 1256 / 1604 / 2184 / 3151, transcribed) rather than observed
+#: rows. The declared predicates are the ones the section 6.4 correction notice
+#: names: the cohort excluded stale and dormant leaders, the benchmark did not,
+#: and both sides now call ``_eligible_as_of()``.
+#:
+#: What is measured here and worth noting: in **all four** splits the benchmark
+#: mean is positive while the cohort mean is between -330 and -1136, so the
+#: asymmetry was present in every split the earlier draft counted as a
+#: confirmation.
+NESTED_FOUR_SPLIT_ASYMMETRY: dict[str, object] = {
+    "name": "nested_four_split_asymmetry",
+    "provenance": "MEASURED_DESIGN",
+    "source": (
+        "copytrade/README.md section 6.2 retraction table (4 nested splits, "
+        "shared end 2026-09-28); per-subject rows illustrative"
+    ),
+    "shared_end": date(2026, 9, 28),
+    "claimed": "POSITIVE 4/4 splits",
+    "independent_windows": 0,
+    "min_independent_windows": 6,
+    # (split, fwd_days, eligible, mean_fwd, median_fwd, hit_pct, bench, excess)
+    "splits": [
+        ("2025-12-10", 292, 1256, -330.4, -200.1, 0.0, 18.3, -348.7),
+        ("2026-02-21", 219, 1604, -452.6, -265.6, 0.0, 26.1, -478.7),
+        ("2026-05-05", 146, 2184, -510.7, -483.5, 10.0, 16.0, -526.7),
+        ("2026-07-17", 73, 3151, -1135.7, -968.7, 5.0, 11.7, -1147.4),
+    ],
+    "cohort_predicate": "eligible_as_of",
+    "cohort_clauses": (
+        "history_days >= min_history_days",
+        "not stale",
+        "first_ts <= split_ts",
+        "not frozen as of split_ts",
+    ),
+    "benchmark_predicate": "benchmark_filter",
+    "benchmark_clauses": ("history_days >= min_history_days",),
+}
+
+#: Dormant subjects as the study defines them: a flat 0% forward return.
+#:
+#: ``PROVENANCE = "ILLUSTRATIVE"``. The *rule* is real -- ``copytrade/backtest.py``
+#: documents a dormant leader's forward return as a flat ``0.0`` and calls that
+#: fake data rather than a flat performance -- but no per-subject forward-return
+#: table for that run survives, so the ten values below demonstrate the mechanism
+#: (a mass of exact zeros on one side only) and are not observations. They feed
+#: the guard's numeric *symptom* instrument, which is itself declared a
+#: heuristic; labelling these MEASURED would dress a heuristic up as a finding.
+DORMANT_ZERO_FORWARD_RETURNS: dict[str, object] = {
+    "name": "dormant_zero_forward_returns",
+    "provenance": "ILLUSTRATIVE",
+    "source": (
+        "mechanism from copytrade/backtest.py _eligible_as_of docstring; "
+        "per-subject forward returns are not persisted for that run"
+    ),
+    "cohort_forward_returns": [5.0, -2.0, 8.5, 0.0, 3.25, -1.5, 12.0, 4.0],
+    "benchmark_forward_returns": [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, -2.0, 0.0, 0.0, 8.5, 0.0,
+    ],
+    "absent_benchmark_clauses": ["not stale", "not frozen as of split_ts"],
+}
+
+
+def comparison_asymmetric() -> dict[str, object]:
+    """Run the comparison guard on the cohort/benchmark asymmetry (must refuse)."""
+    from .guards.comparison import ComparisonGuard, Population, Predicate
+
+    spec = NESTED_FOUR_SPLIT_ASYMMETRY
+    splits = spec["splits"]
+    assert isinstance(splits, list)
+    last = splits[-1]
+    cohort = Population(
+        name="cohort",
+        predicate=Predicate(
+            name=str(spec["cohort_predicate"]),
+            clauses=tuple(spec["cohort_clauses"]),  # type: ignore[arg-type]
+            ordered=True,
+            source="copytrade/backtest.py::_eligible_as_of",
+        ),
+        size=int(last[2]),
+        forward_returns=tuple(
+            float(x) for x in DORMANT_ZERO_FORWARD_RETURNS["cohort_forward_returns"]  # type: ignore[arg-type]
+        ),
+    )
+    benchmark = Population(
+        name="benchmark",
+        predicate=Predicate(
+            name=str(spec["benchmark_predicate"]),
+            clauses=tuple(spec["benchmark_clauses"]),  # type: ignore[arg-type]
+            ordered=True,
+            source="the defect: staleness excluded on the cohort side only",
+        ),
+        size=int(last[2]),
+        forward_returns=tuple(
+            float(x) for x in DORMANT_ZERO_FORWARD_RETURNS["benchmark_forward_returns"]  # type: ignore[arg-type]
+        ),
+    )
+    report = ComparisonGuard().run(cohort, benchmark)
+    return {
+        "fixture": "nested_four_split_asymmetry",
+        "provenance": spec["provenance"],
+        "source": spec["source"],
+        "claimed": spec["claimed"],
+        "independent_windows": spec["independent_windows"],
+        "n_splits": len(splits),
+        "bench_positive_in_every_split": all(float(row[6]) > 0 for row in splits),
+        "same_clauses": report.same_clauses,
+        "asymmetric_filtering": report.asymmetric_filtering,
+        "zero_fraction_gap": report.zero_fraction_gap,
+        "verdict": report.verdict.value,
+        "findings": [f.as_dict() for f in report.findings],
+    }
+
+
+def comparison_shared() -> dict[str, object]:
+    """The clean control: both sides through one declared shared predicate."""
+    from .guards.comparison import ComparisonGuard, Population, Predicate
+
+    spec = NESTED_FOUR_SPLIT_ASYMMETRY
+    shared = Predicate(
+        name="eligible_as_of",
+        clauses=tuple(spec["cohort_clauses"]),  # type: ignore[arg-type]
+        ordered=True,
+        source="copytrade/backtest.py::_eligible_as_of",
+    )
+    cohort = Population(
+        name="cohort",
+        predicate=shared,
+        size=431,
+        forward_returns=(5.0, -2.0, 1.5),
+    )
+    benchmark = Population(
+        name="benchmark",
+        predicate=shared,
+        size=1256,
+        forward_returns=(2.0, -1.0, 0.5),
+    )
+    report = ComparisonGuard().run(cohort, benchmark)
+    return {
+        "fixture": "comparison_shared_control",
+        "provenance": PROVENANCE_ILLUSTRATIVE,
+        "source": "the corrected design: both sides call _eligible_as_of()",
+        "same_name": report.same_name,
+        "same_clauses": report.same_clauses,
+        "comparable": report.comparable,
+        "verdict": report.verdict.value,
+        "findings": [f.as_dict() for f in report.findings],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 10. the clean control
 # ---------------------------------------------------------------------------
 
 #: A genuinely clean setup: one predictor, no look-ahead, effects that do not
@@ -987,6 +1459,19 @@ def clean_control(*, seed: int = 3) -> dict[str, object]:
     unique = _eligible
     subjects = tuple({"id": i, "age_days": 90 + i, "dormant": False} for i in range(40))
 
+    # A clean evidence set: every absence is an explicit 404 and a positive
+    # control came back 200. A clean comparison: both sides declare one shared
+    # predicate. Both are required for the control to exercise guards 7 and 8 --
+    # a control that skips them proves nothing about them.
+    from .guards.comparison import Population, Predicate
+    from .guards.evidence import Observation
+
+    shared = Predicate(
+        name="eligible",
+        clauses=("age_days >= 30", "not dormant"),
+        ordered=True,
+    )
+
     result = ResultSet(
         name="clean_control",
         split_effects=_floats(CLEAN_CONTROL["effects"]),
@@ -1000,6 +1485,24 @@ def clean_control(*, seed: int = 3) -> dict[str, object]:
         cohort=Selection(name="cohort", predicate=unique, selected=subjects[:20]),
         benchmark=Selection(name="benchmark", predicate=unique, selected=subjects[20:]),
         series_values=tuple(clean_series(seed=seed)),
+        observations=(
+            Observation(subject="pypbo", code="404"),
+            Observation(subject="cscv", code="404"),
+            Observation(subject="mlfinlab", code="404"),
+            Observation(subject="deflated-sharpe", code="200"),
+        ),
+        control_observations=(
+            Observation(subject="quantstats", code="200", note="known-present control"),
+        ),
+        cohort_population=Population(
+            name="cohort", predicate=shared, size=20,
+            forward_returns=(4.0, -1.0, 6.5, 2.0),
+        ),
+        benchmark_population=Population(
+            name="benchmark", predicate=shared, size=20,
+            forward_returns=(1.0, 0.5, -2.0, 3.0),
+        ),
+        comparison_predicate=shared,
     )
     report = HonestyReport.run(
         result,
@@ -1050,6 +1553,15 @@ PROVENANCE: dict[str, str] = {
     "multiplicity_341": PROVENANCE_DERIVED,
     "multiplicity_60": PROVENANCE_ILLUSTRATIVE,
     "clean_control": PROVENANCE_ILLUSTRATIVE,
+    # the 2026-09-28 evidence-presence episode: real scan artifacts on disk
+    "pypi_three_state_corrected": PROVENANCE_MEASURED,
+    "pypi_scan_503": PROVENANCE_MEASURED,
+    # the control queries were not persisted; labelled honestly, not upgraded
+    "code_search_null_without_control": PROVENANCE_ILLUSTRATIVE,
+    # the design and the four split aggregates are the study's; the per-subject
+    # rows are not, which is exactly what MEASURED_DESIGN exists to say
+    "nested_four_split_asymmetry": PROVENANCE_MEASURED_DESIGN,
+    "dormant_zero_forward_returns": PROVENANCE_ILLUSTRATIVE,
 }
 
 #: Fixture data dicts, keyed by the same names as :data:`PROVENANCE`.
@@ -1068,6 +1580,11 @@ _FIXTURE_DATA: dict[str, dict[str, object]] = {
     "multiplicity_341": MULTIPLICITY_341,
     "multiplicity_60": MULTIPLICITY_60,
     "clean_control": CLEAN_CONTROL,
+    "pypi_three_state_corrected": PYPI_THREE_STATE_CORRECTED,
+    "pypi_scan_503": PYPI_SCAN_503,
+    "code_search_null_without_control": CODE_SEARCH_NULL_WITHOUT_CONTROL,
+    "nested_four_split_asymmetry": NESTED_FOUR_SPLIT_ASYMMETRY,
+    "dormant_zero_forward_returns": DORMANT_ZERO_FORWARD_RETURNS,
 }
 
 
@@ -1158,6 +1675,8 @@ GUARD_FIXTURES: dict[str, Callable[[], dict[str, object]]] = {
     "universe": universe_asymmetric,
     "multiplicity": multiplicity_341,
     "series": spliced_metrics,
+    "evidence": evidence_negative_evidence,
+    "comparison": comparison_asymmetric,
 }
 
 
