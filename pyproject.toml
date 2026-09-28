@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "honest-backtest"
+version = "0.1.0"
+description = "A validation framework whose purpose is to prevent you from fooling yourself."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "beduldul", email = "alkaysan07@gmail.com" }]
+keywords = [
+    "backtesting",
+    "validation",
+    "statistics",
+    "bootstrap",
+    "multiple-testing",
+    "look-ahead-bias",
+    "research-integrity",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Typing :: Typed",
+]
+# Zero runtime dependencies by design. See the README's "Dependencies" section:
+# the guards operate on hundreds of numbers, and a stdlib-only install is worth
+# more than a microbenchmark here. numpy/pandas are not imported anywhere.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/beduldul/honest-backtest"
+Source = "https://github.com/beduldul/honest-backtest"
+
+[project.scripts]
+honest-backtest = "honest_backtest.cli:main"
+
+[tool.setuptools]
+packages = ["honest_backtest", "honest_backtest.guards", "honest_backtest.stats"]
+
+[tool.setuptools.package-data]
+honest_backtest = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
