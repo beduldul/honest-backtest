@@ -125,8 +125,11 @@ and it was fine" must never look the same downstream.
 
 ## Install
 
+**Not yet on PyPI — the `honest-backtest` name on PyPI belongs to a different
+project. Install from GitHub:**
+
 ```bash
-pip install honest-backtest
+pip install "git+https://github.com/beduldul/honest-backtest.git"
 ```
 
 Python 3.10+. No runtime dependencies.
