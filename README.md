@@ -1,3 +1,4 @@
+[![CI](https://github.com/beduldul/honest-backtest/actions/workflows/ci.yml/badge.svg)](https://github.com/beduldul/honest-backtest/actions/workflows/ci.yml)
 # honest-backtest
 
 **A backtest that cannot refuse is not evidence.**
